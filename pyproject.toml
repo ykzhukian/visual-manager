@@ -1,0 +1,15 @@
+[project]
+name = "visual-manager"
+version = "0.1.0"
+description = "Intelligent photo classification and management tool"
+requires-python = ">=3.12"
+dependencies = [
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

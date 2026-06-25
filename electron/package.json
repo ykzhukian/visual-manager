@@ -1,0 +1,14 @@
+{
+  "name": "visual-manager",
+  "version": "0.1.0",
+  "description": "Intelligent photo classification and management tool",
+  "main": "main.js",
+  "scripts": {
+    "dev": "electron .",
+    "build": "electron-builder"
+  },
+  "devDependencies": {
+    "electron": "^33.4.11",
+    "electron-builder": "^25.0.0"
+  }
+}

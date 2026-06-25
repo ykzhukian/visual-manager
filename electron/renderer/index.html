@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src http://127.0.0.1:8765; style-src 'self' 'unsafe-inline'; img-src 'self' file: data:">
+  <title>Visual Manager</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app">
+    <aside id="sidebar">
+      <h1>Visual Manager</h1>
+      <nav>
+        <button class="nav-btn active" data-view="library">Library</button>
+        <button class="nav-btn" data-view="classify">Classify</button>
+        <button class="nav-btn" data-view="search">Search</button>
+      </nav>
+      <footer id="status">
+        <span id="status-dot" class="dot disconnected"></span>
+        <span id="status-text">Backend —</span>
+      </footer>
+    </aside>
+    <main id="content">
+      <div id="view-library" class="view active">
+        <h2>Library</h2>
+        <div class="toolbar">
+          <button id="btn-browse">Add Photos</button>
+          <button id="btn-describe" disabled>Describe All</button>
+          <span id="selection-count"></span>
+        </div>
+        <div id="scan-status"></div>
+        <div id="photo-grid"></div>
+      </div>
+      <div id="view-classify" class="view">
+        <h2>Classify</h2>
+        <p>Classification settings will go here.</p>
+      </div>
+      <div id="view-search" class="view">
+        <h2>Search</h2>
+        <p>Search interface will go here.</p>
+      </div>
+    </main>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>
