@@ -1,10 +1,13 @@
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 const BACKEND_URL = 'http://127.0.0.1:8765';
 
 contextBridge.exposeInMainWorld('api', {
   // File picker (multi-select images)
   pickFiles: () => ipcRenderer.invoke('dialog:openFiles'),
+
+  // Drag-drop: get absolute path from a dropped File object (Electron 29+)
+  getFilePath: (file) => webUtils.getPathForFile(file),
 
   // Generic fetch wrapper for backend calls
   backend: async (endpoint, options = {}) => {

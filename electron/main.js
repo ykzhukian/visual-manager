@@ -26,6 +26,7 @@ function startBackend() {
       PYTHONUNBUFFERED: '1',
       HF_HOME: 'A:\\cache\\huggingface',
       TORCH_HOME: 'A:\\cache\\torch',
+      HF_ENDPOINT: 'https://hf-mirror.com',
     },
   });
 

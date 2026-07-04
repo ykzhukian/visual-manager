@@ -184,6 +184,33 @@ nav {
   grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
   gap: 12px;
   margin-top: 20px;
+  min-height: 200px;
+  border: 2px dashed transparent;
+  border-radius: 10px;
+  transition: border-color 0.2s, background 0.2s;
+}
+
+#photo-grid.drag-over {
+  border-color: #e94560;
+  background: rgba(233, 69, 96, 0.08);
+}
+
+#drop-hint {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 180px;
+  color: #555;
+  font-size: 15px;
+  user-select: none;
+  pointer-events: none;
+}
+
+#photo-grid.drag-over #drop-hint {
+  color: #e94560;
+  font-size: 18px;
+  font-weight: 500;
 }
 
 .photo-card {

@@ -11,6 +11,10 @@ from pathlib import Path
 # Force all model caches onto A: drive
 os.environ.setdefault("HF_HOME", r"A:\cache\huggingface")
 os.environ.setdefault("TORCH_HOME", r"A:\cache\torch")
+# Use HF mirror for model downloads (hf.co blocked from this network)
+os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
+# Windows symlink warning is harmless, suppress it
+os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
 
 # Ensure backend/ is on sys.path
 sys.path.insert(0, str(Path(__file__).resolve().parent))

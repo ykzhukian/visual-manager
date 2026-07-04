@@ -36,6 +36,84 @@ setInterval(checkBackend, 5000);
 // --- State ---
 let selectedPhotos = [];  // array of file paths
 
+const IMAGE_EXTENSIONS = new Set([
+  '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.tiff', '.tif', '.heic', '.heif',
+]);
+
+// --- Drag & Drop ---
+
+const photoGrid = document.getElementById('photo-grid');
+let dragCounter = 0;
+
+photoGrid.addEventListener('dragover', (e) => {
+  e.preventDefault();
+  e.stopPropagation();
+  e.dataTransfer.dropEffect = 'copy';
+});
+
+photoGrid.addEventListener('dragenter', (e) => {
+  e.preventDefault();
+  e.stopPropagation();
+  dragCounter++;
+  photoGrid.classList.add('drag-over');
+});
+
+photoGrid.addEventListener('dragleave', (e) => {
+  e.preventDefault();
+  e.stopPropagation();
+  dragCounter--;
+  if (dragCounter <= 0) {
+    dragCounter = 0;
+    photoGrid.classList.remove('drag-over');
+  }
+});
+
+photoGrid.addEventListener('drop', (e) => {
+  e.preventDefault();
+  e.stopPropagation();
+  dragCounter = 0;
+  photoGrid.classList.remove('drag-over');
+
+  const files = Array.from(e.dataTransfer.files);
+  if (!files.length) return;
+
+  // Use Electron's webUtils.getPathForFile (replaces deprecated File.path)
+  const imagePaths = [];
+  for (const f of files) {
+    const p = window.api.getFilePath(f);
+    if (p) {
+      const ext = p.slice(p.lastIndexOf('.')).toLowerCase();
+      if (IMAGE_EXTENSIONS.has(ext)) imagePaths.push(p);
+    }
+  }
+
+  if (!imagePaths.length) {
+    document.getElementById('scan-status').textContent = 'No valid image files dropped.';
+    return;
+  }
+
+  const existing = new Set(selectedPhotos);
+  let added = 0;
+  for (const p of imagePaths) {
+    if (!existing.has(p)) {
+      selectedPhotos.push(p);
+      existing.add(p);
+      added++;
+    }
+  }
+
+  renderGrid();
+  document.getElementById('scan-status').textContent =
+    `Dropped ${imagePaths.length} file(s). Added ${added} new. Total: ${selectedPhotos.length}.`;
+});
+
+// Block OS file-open on areas outside the grid
+document.addEventListener('dragover', (e) => e.preventDefault());
+document.addEventListener('drop', (e) => {
+  // Only preventDefault for drops outside the grid (grid handler stops propagation)
+  e.preventDefault();
+});
+
 // --- Render photo grid ---
 function renderGrid() {
   const grid = document.getElementById('photo-grid');
@@ -46,7 +124,7 @@ function renderGrid() {
   btnDescribe.disabled = selectedPhotos.length === 0;
 
   if (!selectedPhotos.length) {
-    grid.innerHTML = '<p style="color:#666;">No photos selected. Click "Add Photos" to get started.</p>';
+    grid.innerHTML = '<div id="drop-hint">Drop images here</div>';
     return;
   }
 
