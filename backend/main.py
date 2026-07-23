@@ -24,6 +24,10 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from api import router as api_router
+from database import init_db
+
+# Initialize SQLite database
+init_db()
 
 app = FastAPI(title="Visual Manager Backend", version="0.1.0")
 

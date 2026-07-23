@@ -1,21 +1,12 @@
-// --- Navigation ---
-document.querySelectorAll('.nav-btn').forEach(btn => {
-  btn.addEventListener('click', () => {
-    document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
-    document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+// ======================================================================
+// Backend health check
+// ======================================================================
 
-    btn.classList.add('active');
-    document.getElementById(`view-${btn.dataset.view}`).classList.add('active');
-  });
-});
-
-// --- Backend health check ---
 async function checkBackend() {
   try {
     const status = await window.api.getBackendStatus();
     const dot = document.getElementById('status-dot');
     const text = document.getElementById('status-text');
-
     if (status.status === 'ok') {
       dot.className = 'dot connected';
       text.textContent = 'Backend ✓';
@@ -29,18 +20,480 @@ async function checkBackend() {
   }
 }
 
-// Check immediately and every 5 seconds
-checkBackend();
+// ======================================================================
+// Init
+// ======================================================================
+
+async function initApp() {
+  await checkBackend();
+  await loadCategories();
+  await loadPersistedPhotos();
+}
+initApp();
 setInterval(checkBackend, 5000);
 
-// --- State ---
-let selectedPhotos = [];  // array of file paths
+// ======================================================================
+// State
+// ======================================================================
+
+let selectedPhotos = [];
+const photoStore = {};          // path → { description, descriptionStatus, categories: [{id,name},...] }
+let allCategories = [];         // [{id, name, photo_count}, ...]
+let activeCategoryId = null;    // null = "All Photos"
+let selectedCardPaths = new Set(); // multi-select for batch categorization
 
 const IMAGE_EXTENSIONS = new Set([
   '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.tiff', '.tif', '.heic', '.heif',
 ]);
 
-// --- Drag & Drop ---
+// ======================================================================
+// Utilities
+// ======================================================================
+
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+const BACKEND_URL = 'http://127.0.0.1:8765';
+
+function thumbUrl(path) {
+  return `${BACKEND_URL}/api/thumbnails?path=${encodeURIComponent(path)}`;
+}
+
+function formatSize(bytes) {
+  if (bytes === null || bytes === undefined) return '—';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1048576) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${(bytes / 1048576).toFixed(1)} MB`;
+}
+
+// Cache file sizes so we never fetch the same path twice
+const fileSizeCache = {};
+
+async function loadFileSizes(container) {
+  if (!container) return;
+  const cards = container.querySelectorAll('.photo-card');
+  const uncached = [];
+  const cardMap = [];
+  cards.forEach(card => {
+    const p = card.dataset.path;
+    if (p && fileSizeCache[p] === undefined) {
+      uncached.push(p);
+      cardMap.push(card);
+    } else if (p) {
+      const badge = card.querySelector('.photo-badge');
+      if (badge) badge.textContent = formatSize(fileSizeCache[p]);
+    }
+  });
+  if (!uncached.length) return;
+  try {
+    const stats = await window.api.getFileStats(uncached);
+    cardMap.forEach(card => {
+      const p = card.dataset.path;
+      fileSizeCache[p] = stats[p];
+      const badge = card.querySelector('.photo-badge');
+      if (badge) badge.textContent = formatSize(stats[p]);
+    });
+  } catch { /* ignore */ }
+}
+
+// ======================================================================
+// Categories
+// ======================================================================
+
+async function loadCategories() {
+  try {
+    const result = await window.api.getCategories();
+    if (result.status === 'ok') {
+      allCategories = result.categories || [];
+      renderCategoryList();
+      updateBatchSelect();
+      updateCategoryCounts();
+    }
+  } catch (err) {
+    console.error('Failed to load categories:', err);
+  }
+}
+
+function renderCategoryList() {
+  const container = document.getElementById('category-list');
+  container.innerHTML = `
+    <div class="category-item all${activeCategoryId === null ? ' active' : ''}" data-category-id="">
+      <span class="category-name">All Photos</span>
+      <span class="category-count" id="count-all">${selectedPhotos.length}</span>
+    </div>
+  ` + allCategories.map(cat => {
+    const active = activeCategoryId === cat.id ? ' active' : '';
+    return `
+      <div class="category-item${active}" data-category-id="${cat.id}">
+        <span class="category-name">${escapeHtml(cat.name)}</span>
+        <span class="category-count">${cat.photo_count}</span>
+        <span class="category-actions">
+          <button class="cat-edit" data-id="${cat.id}" data-name="${escapeHtml(cat.name)}" title="Rename">✎</button>
+          <button class="cat-delete" data-id="${cat.id}" title="Delete">✕</button>
+        </span>
+        <span class="category-action-edit" style="display:none">
+          <input class="category-edit-input" value="${escapeHtml(cat.name)}" maxlength="60">
+          <button class="cat-edit-save" data-id="${cat.id}">✓</button>
+        </span>
+      </div>
+    `;
+  }).join('');
+
+  // Click handler: filter by category
+  container.querySelectorAll('.category-item').forEach(item => {
+    item.addEventListener('click', (e) => {
+      // Don't trigger when clicking edit/delete buttons or inputs
+      if (e.target.closest('button') || e.target.closest('input')) return;
+      const catId = item.dataset.categoryId;
+      activeCategoryId = catId ? parseInt(catId) : null;
+      renderCategoryList();
+      loadFilteredPhotos();
+    });
+  });
+
+  // Edit button
+  container.querySelectorAll('.cat-edit').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const item = btn.closest('.category-item');
+      item.classList.add('editing');
+      item.querySelector('.category-edit-input').focus();
+    });
+  });
+
+  // Save edit
+  container.querySelectorAll('.cat-edit-save').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const id = parseInt(btn.dataset.id);
+      const input = btn.closest('.category-item').querySelector('.category-edit-input');
+      const newName = input.value.trim();
+      if (newName) {
+        await window.api.renameCategory(id, newName);
+        await loadCategories();
+        await loadFilteredPhotos();
+      }
+    });
+  });
+
+  // Enter key in edit input
+  container.querySelectorAll('.category-edit-input').forEach(input => {
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        input.closest('.category-item').querySelector('.cat-edit-save').click();
+      }
+      if (e.key === 'Escape') {
+        const item = input.closest('.category-item');
+        item.classList.remove('editing');
+      }
+    });
+  });
+
+  // Delete button
+  container.querySelectorAll('.cat-delete').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const id = parseInt(btn.dataset.id);
+      await window.api.deleteCategory(id);
+      if (activeCategoryId === id) activeCategoryId = null;
+      await loadCategories();
+      await loadFilteredPhotos();
+    });
+  });
+
+  // "All Photos" click handler re-bind
+  const allBtn = container.querySelector('.category-item.all');
+  if (allBtn) {
+    allBtn.addEventListener('click', () => {
+      activeCategoryId = null;
+      renderCategoryList();
+      loadFilteredPhotos();
+    });
+  }
+}
+
+function updateCategoryCounts() {
+  const countAll = document.getElementById('count-all');
+  if (countAll) countAll.textContent = selectedPhotos.length;
+}
+
+// Batch select dropdown
+function updateBatchSelect() {
+  const sel = document.getElementById('batch-category-select');
+  sel.innerHTML = '<option value="">Assign category...</option>' +
+    allCategories.map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('');
+}
+
+// Create category
+document.getElementById('btn-add-category').addEventListener('click', async () => {
+  const input = document.getElementById('category-input');
+  const name = input.value.trim();
+  if (!name) return;
+  await window.api.createCategory(name);
+  input.value = '';
+  await loadCategories();
+});
+
+document.getElementById('category-input').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') document.getElementById('btn-add-category').click();
+});
+
+// ======================================================================
+// Photo loading & filtering
+// ======================================================================
+
+async function loadPersistedPhotos() {
+  try {
+    const result = await window.api.loadPhotos();
+    if (result.status === 'ok' && result.photos.length) {
+      for (const p of result.photos) {
+        if (!selectedPhotos.includes(p.path)) {
+          selectedPhotos.push(p.path);
+        }
+        photoStore[p.path] = {
+          description: p.description || '',
+          descriptionStatus: p.descriptionStatus || '',
+          categories: p.categories || [],
+        };
+      }
+      renderGrid();
+      document.getElementById('btn-describe').disabled = selectedPhotos.length === 0;
+      document.getElementById('scan-status').textContent =
+        `Loaded ${result.photos.length} photo(s) from previous session.`;
+    }
+  } catch (err) {
+    console.error('Failed to load photos:', err);
+  }
+}
+
+async function loadFilteredPhotos() {
+  // Reload from backend with category filter
+  let params = '';
+  if (activeCategoryId !== null) {
+    params = `?category_id=${activeCategoryId}`;
+  }
+  try {
+    const result = await window.api.loadPhotos(params);
+    if (result.status === 'ok') {
+      // Update selectedPhotos and photoStore from filtered result
+      const paths = [];
+      for (const p of result.photos) {
+        paths.push(p.path);
+        photoStore[p.path] = {
+          description: p.description || '',
+          descriptionStatus: p.descriptionStatus || '',
+          categories: p.categories || [],
+        };
+      }
+      // Don't overwrite selectedPhotos; just filter what we show
+      // But we need to update category data from backend
+      for (const p of result.photos) {
+        if (photoStore[p.path]) {
+          photoStore[p.path].categories = p.categories || [];
+        }
+      }
+      updateCategoryCountsInner();
+      renderGrid();
+    }
+  } catch (err) {
+    console.error('Failed to filter photos:', err);
+  }
+}
+
+function updateCategoryCountsInner() {
+  const countEl = document.getElementById('count-all');
+  if (countEl) {
+    countEl.textContent = activeCategoryId === null ? selectedPhotos.length : getFilteredPhotos().length;
+  }
+}
+
+function getFilteredPhotos() {
+  let paths = [...selectedPhotos];
+  // Apply category filter
+  if (activeCategoryId !== null) {
+    paths = paths.filter(p => {
+      const cats = (photoStore[p] && photoStore[p].categories) || [];
+      return cats.some(c => c.id === activeCategoryId);
+    });
+  }
+  // Apply search filter
+  const query = document.getElementById('search-input').value.trim().toLowerCase();
+  if (query) {
+    paths = paths.filter(p => {
+      const entry = photoStore[p];
+      if (!entry) return false;
+      const descMatch = entry.description && entry.description.toLowerCase().includes(query);
+      const catMatch = entry.categories && entry.categories.some(c => c.name.toLowerCase().includes(query));
+      return descMatch || catMatch;
+    });
+  }
+  return paths;
+}
+
+// ======================================================================
+// Render
+// ======================================================================
+
+function renderGrid() {
+  const container = document.getElementById('photo-grid');
+  if (!container) return;
+
+  const paths = getFilteredPhotos();
+
+  if (!paths.length) {
+    container.innerHTML = '<div class="drop-hint">No photos</div>';
+    updateSelectionBar();
+    updateCategoryCountsInner();
+    return;
+  }
+
+  container.innerHTML = paths.map((path) => {
+    const entry = photoStore[path] || {};
+    const fname = path.split('\\').pop() || path;
+    const infoText = entry.description || fname;
+    const isSel = selectedCardPaths.has(path) ? ' selected' : '';
+
+    const catTags = (entry.categories || []).map(c =>
+      `<span class="photo-badge cat-tag" data-category-id="${c.id}" title="Filter: ${escapeHtml(c.name)}">${escapeHtml(c.name)}</span>`
+    ).join('');
+
+    const sizeText = fileSizeCache[path] !== undefined ? formatSize(fileSizeCache[path]) : '...';
+
+    return `
+      <div class="photo-card${isSel}" data-path="${escapeHtml(path)}">
+        <button class="btn-remove" data-path="${escapeHtml(path)}" title="Remove">✕</button>
+        <div class="photo-badges">
+          <span class="photo-badge">${sizeText}</span>
+          ${catTags}
+        </div>
+        <img decoding="async" src="${thumbUrl(path)}"
+             onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
+        <div class="photo-placeholder" style="display:none">📷</div>
+        <div class="photo-info">${escapeHtml(infoText)}</div>
+      </div>
+    `;
+  }).join('');
+
+  loadFileSizes(container);
+
+  updateSelectionBar();
+  updateCategoryCountsInner();
+}
+
+// Event delegation on the grid (set up once, not re-bound on every render)
+document.getElementById('photo-grid').addEventListener('click', (e) => {
+  // Remove button
+  const removeBtn = e.target.closest('.btn-remove');
+  if (removeBtn) {
+    e.stopPropagation();
+    removePhoto(removeBtn.dataset.path);
+    return;
+  }
+
+  // Category tag → filter by that category
+  const catTag = e.target.closest('.cat-tag');
+  if (catTag) {
+    e.stopPropagation();
+    const catId = parseInt(catTag.dataset.categoryId);
+    activeCategoryId = catId;
+        renderCategoryList();
+    renderGrid();
+    return;
+  }
+
+  // Card → toggle selection
+  const card = e.target.closest('.photo-card');
+  if (card) {
+    const p = card.dataset.path;
+    if (selectedCardPaths.has(p)) {
+      selectedCardPaths.delete(p);
+      card.classList.remove('selected');
+    } else {
+      selectedCardPaths.add(p);
+      card.classList.add('selected');
+    }
+    updateSelectionBar();
+  }
+});
+
+function updateSelectionBar() {
+  const bar = document.getElementById('selection-bar');
+  const countEl = document.getElementById('selection-count');
+  const btn = document.getElementById('btn-batch-categorize');
+
+  if (selectedCardPaths.size > 0) {
+    bar.classList.add('visible');
+    countEl.textContent = `${selectedCardPaths.size} selected`;
+    btn.disabled = false;
+  } else {
+    bar.classList.remove('visible');
+    btn.disabled = true;
+  }
+}
+
+// ======================================================================
+// Photo management
+// ======================================================================
+
+function removePhoto(path) {
+  selectedPhotos = selectedPhotos.filter(p => p !== path);
+  selectedCardPaths.delete(path);
+  _lastRenderedPaths = ''; // force rebuild
+  window.api.removePhoto(path).catch(() => {});
+  renderGrid();
+  document.getElementById('btn-describe').disabled = selectedPhotos.length === 0;
+  updateCategoryCounts();
+  updateBatchSelect();
+}
+
+// ======================================================================
+// Deselect all
+// ======================================================================
+
+document.getElementById('btn-deselect-all').addEventListener('click', () => {
+  selectedCardPaths.clear();
+  document.querySelectorAll('.photo-card.selected').forEach(c => c.classList.remove('selected'));
+  updateSelectionBar();
+});
+
+// ======================================================================
+// Batch categorize
+// ======================================================================
+
+document.getElementById('btn-batch-categorize').addEventListener('click', async () => {
+  const sel = document.getElementById('batch-category-select');
+  const catId = parseInt(sel.value);
+  if (!catId || selectedCardPaths.size === 0) return;
+
+  const paths = Array.from(selectedCardPaths);
+  await window.api.categorizePhotos(paths, [catId]);
+
+  // Update local store
+  const catName = allCategories.find(c => c.id === catId)?.name || '';
+  paths.forEach(p => {
+    if (!photoStore[p]) photoStore[p] = { description: '', descriptionStatus: '', categories: [] };
+    const cats = photoStore[p].categories;
+    if (!cats.some(c => c.id === catId)) {
+      cats.push({ id: catId, name: catName });
+    }
+  });
+
+  selectedCardPaths.clear();
+    await loadCategories();
+  renderGrid();
+  sel.value = '';
+});
+
+// Remove category from selected photos (via clicking tag in selection context)
+// This is handled by a right-click or could be a future feature
+// For now: clicking a tag on a card filters by that category
+
+// ======================================================================
+// Drag & Drop
+// ======================================================================
 
 const photoGrid = document.getElementById('photo-grid');
 let dragCounter = 0;
@@ -77,7 +530,6 @@ photoGrid.addEventListener('drop', (e) => {
   const files = Array.from(e.dataTransfer.files);
   if (!files.length) return;
 
-  // Use Electron's webUtils.getPathForFile (replaces deprecated File.path)
   const imagePaths = [];
   for (const f of files) {
     const p = window.api.getFilePath(f);
@@ -93,109 +545,94 @@ photoGrid.addEventListener('drop', (e) => {
   }
 
   const existing = new Set(selectedPhotos);
-  let added = 0;
+  const newPaths = [];
   for (const p of imagePaths) {
     if (!existing.has(p)) {
       selectedPhotos.push(p);
       existing.add(p);
-      added++;
+      newPaths.push(p);
     }
   }
 
-  renderGrid();
-  document.getElementById('scan-status').textContent =
-    `Dropped ${imagePaths.length} file(s). Added ${added} new. Total: ${selectedPhotos.length}.`;
-});
-
-// Block OS file-open on areas outside the grid
-document.addEventListener('dragover', (e) => e.preventDefault());
-document.addEventListener('drop', (e) => {
-  // Only preventDefault for drops outside the grid (grid handler stops propagation)
-  e.preventDefault();
-});
-
-// --- Render photo grid ---
-function renderGrid() {
-  const grid = document.getElementById('photo-grid');
-  const btnDescribe = document.getElementById('btn-describe');
-  const countEl = document.getElementById('selection-count');
-
-  countEl.textContent = selectedPhotos.length ? `${selectedPhotos.length} photo(s)` : '';
-  btnDescribe.disabled = selectedPhotos.length === 0;
-
-  if (!selectedPhotos.length) {
-    grid.innerHTML = '<div id="drop-hint">Drop images here</div>';
-    return;
+  if (newPaths.length) {
+    window.api.addPhotos(newPaths).catch(() => {});
   }
 
-  grid.innerHTML = selectedPhotos.map((path, i) => {
-    const fname = path.split('\\').pop() || path;
-    return `
-      <div class="photo-card" data-index="${i}">
-        <button class="btn-remove" data-index="${i}" title="Remove">✕</button>
-        <img src="file:///${path.replace(/\\/g, '/')}"
-             onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
-        <div class="photo-placeholder" style="display:none">📷</div>
-        <div class="photo-info">${fname}</div>
-      </div>
-    `;
-  }).join('');
+    renderGrid();
+  document.getElementById('btn-describe').disabled = selectedPhotos.length === 0;
+  document.getElementById('scan-status').textContent =
+    `Dropped ${imagePaths.length} file(s). Added ${newPaths.length} new. Total: ${selectedPhotos.length}.`;
+  updateCategoryCounts();
+});
 
-  // Remove button handlers
-  grid.querySelectorAll('.btn-remove').forEach(btn => {
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      const idx = parseInt(btn.dataset.index);
-      removePhoto(idx);
-    });
-  });
-}
+document.addEventListener('dragover', (e) => e.preventDefault());
+document.addEventListener('drop', (e) => { e.preventDefault(); });
 
-function removePhoto(index) {
-  selectedPhotos.splice(index, 1);
-  renderGrid();
-}
+// ======================================================================
+// Browse photos
+// ======================================================================
 
-// --- Add Photos ---
 document.getElementById('btn-browse').addEventListener('click', async () => {
   const files = await window.api.pickFiles();
   if (files && files.length) {
-    // Deduplicate
     const existing = new Set(selectedPhotos);
+    const newPaths = [];
     for (const f of files) {
       if (!existing.has(f)) {
         selectedPhotos.push(f);
         existing.add(f);
+        newPaths.push(f);
       }
     }
-    renderGrid();
+    if (newPaths.length) {
+      window.api.addPhotos(newPaths).catch(() => {});
+    }
+        renderGrid();
+    document.getElementById('btn-describe').disabled = selectedPhotos.length === 0;
     document.getElementById('scan-status').textContent =
       `Added ${files.length} photo(s). Total: ${selectedPhotos.length}.`;
+    updateCategoryCounts();
   }
 });
 
-// --- Describe photos ---
+// ======================================================================
+// Describe
+// ======================================================================
+
 document.getElementById('btn-describe').addEventListener('click', async () => {
   if (!selectedPhotos.length) return;
 
   const statusEl = document.getElementById('scan-status');
   statusEl.textContent = 'Describing photos...';
+  document.getElementById('btn-describe').disabled = true;
 
   try {
     const result = await window.api.describePhotos(selectedPhotos);
     if (result.status === 'ok') {
-      const cards = document.querySelectorAll('.photo-card');
-      result.results.forEach((r, i) => {
-        if (cards[i]) {
-          const infoEl = cards[i].querySelector('.photo-info');
-          if (infoEl) {
-            infoEl.textContent = r.status === 'ok' ? r.description : `❌ ${r.error}`;
-          }
-        }
+      result.results.forEach(r => {
+        if (!photoStore[r.path]) photoStore[r.path] = { description: '', descriptionStatus: '', categories: [] };
+        photoStore[r.path].description = r.description || '';
+        photoStore[r.path].descriptionStatus = r.status;
       });
+            renderGrid();
       statusEl.textContent = `Described ${result.count} photo(s).`;
     }
   } catch (err) {
     statusEl.textContent = `Error: ${err.message}`;
+  } finally {
+    document.getElementById('btn-describe').disabled = selectedPhotos.length === 0;
   }
+});
+
+// ======================================================================
+// Search
+// ======================================================================
+
+let searchTimeout;
+document.getElementById('search-input').addEventListener('input', () => {
+  clearTimeout(searchTimeout);
+  searchTimeout = setTimeout(() => {
+    _lastRenderedPaths = ''; // force rebuild on search
+    renderGrid();
+  }, 200);
 });

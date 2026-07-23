@@ -8,3 +8,7 @@ dist/
 
 github-ssh-key.txt
 package-lock.json
+
+# Runtime data
+backend/visual_manager.db
+backend/thumbnails/

@@ -2,6 +2,7 @@ const { app, BrowserWindow, ipcMain, dialog } = require('electron');
 const { spawn } = require('child_process');
 const path = require('path');
 const http = require('http');
+const fs = require('fs');
 
 const BACKEND_PORT = 8765;
 const BACKEND_URL = `http://127.0.0.1:${BACKEND_PORT}`;
@@ -79,6 +80,20 @@ ipcMain.handle('dialog:openFiles', async () => {
   });
   if (result.canceled || result.filePaths.length === 0) return [];
   return result.filePaths;
+});
+
+// --- IPC: file stats ---
+
+ipcMain.handle('file:stats', async (_event, paths) => {
+  const stats = {};
+  for (const p of paths) {
+    try {
+      stats[p] = fs.statSync(p).size;
+    } catch {
+      stats[p] = null;
+    }
+  }
+  return stats;
 });
 
 // --- Window ---

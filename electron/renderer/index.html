@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src http://127.0.0.1:8765; style-src 'self' 'unsafe-inline'; img-src 'self' file: data:">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src http://127.0.0.1:8765; style-src 'self' 'unsafe-inline'; img-src 'self' file: data: http://127.0.0.1:8765">
   <title>Visual Manager</title>
   <link rel="stylesheet" href="style.css">
 </head>
@@ -11,36 +11,54 @@
   <div id="app">
     <aside id="sidebar">
       <h1>Visual Manager</h1>
-      <nav>
-        <button class="nav-btn active" data-view="library">Library</button>
-        <button class="nav-btn" data-view="classify">Classify</button>
-        <button class="nav-btn" data-view="search">Search</button>
-      </nav>
+
+      <!-- Category section -->
+      <div id="category-section">
+        <div class="section-header">
+          <span>Categories</span>
+        </div>
+        <div class="category-add-row">
+          <input type="text" id="category-input" placeholder="New category..." maxlength="60">
+          <button id="btn-add-category" title="Add">+</button>
+        </div>
+        <div id="category-list" class="category-list">
+          <div class="category-item all active" data-category-id="">
+            <span class="category-name">All Photos</span>
+            <span class="category-count" id="count-all">0</span>
+          </div>
+        </div>
+      </div>
+
       <footer id="status">
         <span id="status-dot" class="dot disconnected"></span>
         <span id="status-text">Backend —</span>
       </footer>
     </aside>
+
     <main id="content">
       <div id="view-library" class="view active">
-        <h2>Library</h2>
-        <div class="toolbar">
-          <button id="btn-browse">Add Photos</button>
-          <button id="btn-describe" disabled>Describe All</button>
-          <span id="selection-count"></span>
+        <div class="library-header">
+          <h2>Library</h2>
+          <div class="toolbar">
+            <button id="btn-browse">Add Photos</button>
+            <button id="btn-describe" disabled>Describe All</button>
+          </div>
+          <input type="text" id="search-input" placeholder="Search by description or category...">
         </div>
         <div id="scan-status"></div>
-        <div id="photo-grid">
-          <div id="drop-hint">Drop images here</div>
+        <div id="selection-bar">
+          <span id="selection-count"></span>
+          <button id="btn-deselect-all" class="btn-deselect" title="Deselect all">✕</button>
+          <div class="category-batch-row">
+            <select id="batch-category-select">
+              <option value="">Assign category...</option>
+            </select>
+            <button id="btn-batch-categorize" disabled>Apply</button>
+          </div>
         </div>
-      </div>
-      <div id="view-classify" class="view">
-        <h2>Classify</h2>
-        <p>Classification settings will go here.</p>
-      </div>
-      <div id="view-search" class="view">
-        <h2>Search</h2>
-        <p>Search interface will go here.</p>
+        <div id="photo-grid" class="photo-grid">
+          <div class="drop-hint">Drop images here</div>
+        </div>
       </div>
     </main>
   </div>
