@@ -45,6 +45,32 @@ contextBridge.exposeInMainWorld('api', {
       body: JSON.stringify({ paths }),
     }).then(r => r.json()),
 
+  describePhotosStream: (paths, onEvent) =>
+    fetch(`${BACKEND_URL}/api/describe-stream`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ paths }),
+    }).then(async (res) => {
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n\n');
+        buffer = lines.pop() || '';
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            try {
+              const event = JSON.parse(line.slice(6));
+              onEvent(event);
+            } catch {}
+          }
+        }
+      }
+    }),
+
   // --- Categories ---
 
   getCategories: () =>
@@ -86,6 +112,19 @@ contextBridge.exposeInMainWorld('api', {
   // --- File stats ---
 
   getFileStats: (paths) => ipcRenderer.invoke('file:stats', paths),
+
+  // --- Media matching ---
+
+  matchPairs: (directory, threshold = 0.25) =>
+    fetch(`${BACKEND_URL}/api/match-pairs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ directory, threshold }),
+    }).then(r => r.json()),
+
+  // --- File picker (directory) ---
+
+  pickDirectory: () => ipcRenderer.invoke('dialog:openDirectory'),
 
   // --- Backend health ---
 

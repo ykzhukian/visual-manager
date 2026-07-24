@@ -85,6 +85,17 @@ ipcMain.handle('dialog:openFiles', async () => {
   return result.filePaths;
 });
 
+// --- IPC: directory picker ---
+
+ipcMain.handle('dialog:openDirectory', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    properties: ['openDirectory'],
+    title: 'Select Directory',
+  });
+  if (result.canceled || result.filePaths.length === 0) return null;
+  return result.filePaths[0];
+});
+
 // --- IPC: file stats ---
 
 ipcMain.handle('file:stats', async (_event, paths) => {

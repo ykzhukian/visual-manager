@@ -10,6 +10,8 @@ import torch
 from PIL import Image
 from transformers import BlipProcessor, BlipForConditionalGeneration
 
+from database import get_all_photos, save_descriptions
+
 # Load model once at module import (lazy, only when first used)
 _model = None
 _processor = None
@@ -79,3 +81,24 @@ def describe_images(image_paths: list[str]) -> list[dict]:
         except Exception as exc:
             results.append({"path": path, "description": "", "status": "error", "error": str(exc)})
     return results
+
+
+def describe_images_stream(image_paths: list[str]):
+    """Generator that yields progress events as images are described.
+
+    Yields dicts: {"type": "progress", "path": ..., "current": N, "total": N, "status": "ok"/"error", ...}
+    Final yield: {"type": "done", "count": N}
+    """
+    _load_model()
+    total = len(image_paths)
+    for i, path in enumerate(image_paths):
+        try:
+            desc = describe_image(path)
+            yield {"type": "progress", "path": path, "current": i + 1, "total": total,
+                   "description": desc, "status": "ok"}
+            # Save to DB immediately
+            save_descriptions([{"path": path, "description": desc, "status": "ok"}])
+        except Exception as exc:
+            yield {"type": "progress", "path": path, "current": i + 1, "total": total,
+                   "description": "", "status": "error", "error": str(exc)}
+    yield {"type": "done", "count": total}

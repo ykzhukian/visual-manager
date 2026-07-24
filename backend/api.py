@@ -4,11 +4,13 @@ import hashlib
 import os
 from pathlib import Path
 
+import json
+
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from PIL import Image
 
-from captioner import describe_images
+from captioner import describe_images, describe_images_stream
 from database import (
     add_photos,
     categorize_photos,
@@ -21,6 +23,7 @@ from database import (
     save_descriptions,
     uncategorize_photos,
 )
+from matcher import match_pairs, scan_directory
 
 router = APIRouter()
 
@@ -204,3 +207,69 @@ def describe_photos(data: dict):
     save_descriptions(results)
 
     return {"status": "ok", "count": len(results), "results": results}
+
+
+@router.post("/describe-stream")
+async def describe_photos_stream(data: dict):
+    """Describe photos with SSE progress events.
+
+    Body: {"paths": [...]}
+    Returns: text/event-stream with one event per photo.
+    """
+    paths = data.get("paths", [])
+    if not paths:
+        raise HTTPException(status_code=400, detail="No paths provided")
+
+    # Ensure photos are in DB
+    add_photos(paths)
+
+    async def event_stream():
+        for event in describe_images_stream(paths):
+            yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+# ======================================================================
+# Media matching (CLIP-based)
+# ======================================================================
+
+@router.post("/match-pairs")
+def api_match_pairs(data: dict):
+    """Scan a directory and match images to videos via CLIP similarity.
+
+    Body: {"directory": "/path/to/media", "threshold": 0.25}
+    threshold = minimum cosine similarity to consider a match (0.0–1.0).
+    """
+    directory = data.get("directory", "")
+    threshold = data.get("threshold", 0.25)
+
+    if not directory or not os.path.isdir(directory):
+        raise HTTPException(status_code=400, detail="Invalid or missing directory")
+
+    files = scan_directory(directory)
+
+    if not files["images"]:
+        return {"status": "ok", "pairs": [], "unmatched_images": [],
+                "unmatched_videos": files["videos"], "total_images": 0, "total_videos": len(files["videos"])}
+
+    if not files["videos"]:
+        return {"status": "ok", "pairs": [], "unmatched_images": files["images"],
+                "unmatched_videos": [], "total_images": len(files["images"]), "total_videos": 0}
+
+    result = match_pairs(files["images"], files["videos"], threshold=threshold)
+
+    return {
+        "status": "ok",
+        **result,
+        "total_images": len(files["images"]),
+        "total_videos": len(files["videos"]),
+    }

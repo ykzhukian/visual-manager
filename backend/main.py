@@ -16,6 +16,10 @@ os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
 # Windows symlink warning is harmless, suppress it
 os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
 
+# Register HEIC/HEIF support with Pillow
+from pillow_heif import register_heif_opener
+register_heif_opener()
+
 # Ensure backend/ is on sys.path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 

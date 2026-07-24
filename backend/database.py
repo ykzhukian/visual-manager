@@ -37,8 +37,6 @@ def init_db(db_path: str | None = None) -> None:
             deleted_at  TIMESTAMP
         );
 
-        CREATE INDEX IF NOT EXISTS idx_photos_deleted ON photos(deleted);
-
         CREATE TABLE IF NOT EXISTS descriptions (
             id          INTEGER PRIMARY KEY AUTOINCREMENT,
             photo_id    INTEGER NOT NULL REFERENCES photos(id) ON DELETE CASCADE,
@@ -64,14 +62,19 @@ def init_db(db_path: str | None = None) -> None:
         CREATE INDEX IF NOT EXISTS idx_pc_category_id ON photo_categories(category_id);
         """)
         # Migrate existing databases that lack the soft-delete columns
-        for col, ddl in [
-            ("deleted", "ALTER TABLE photos ADD COLUMN deleted INTEGER DEFAULT 0"),
-            ("deleted_at", "ALTER TABLE photos ADD COLUMN deleted_at TIMESTAMP"),
+        for ddl in [
+            "ALTER TABLE photos ADD COLUMN deleted INTEGER DEFAULT 0",
+            "ALTER TABLE photos ADD COLUMN deleted_at TIMESTAMP",
         ]:
             try:
                 conn.execute(ddl)
             except sqlite3.OperationalError:
                 pass  # column already exists
+
+        # Create index on deleted column (must be after migration)
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_photos_deleted ON photos(deleted)"
+        )
         conn.commit()
         print(f"[database] Initialized at {_db_path}")
     finally:
@@ -250,9 +253,9 @@ def get_all_photos(category_id: int | None = None, query: str | None = None) -> 
     """
     conn = _connect()
     try:
-        sql = "SELECT id, path, added_at FROM photos WHERE deleted = 0"
+        sql = "SELECT id, path, added_at FROM photos"
         params: list = []
-        conditions: list[str] = []
+        conditions: list[str] = ["deleted = 0"]
 
         if category_id is not None:
             conditions.append("id IN (SELECT photo_id FROM photo_categories WHERE category_id = ?)")

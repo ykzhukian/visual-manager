@@ -28,6 +28,7 @@ async function initApp() {
   await checkBackend();
   await loadCategories();
   await loadPersistedPhotos();
+  document.getElementById('photo-count').textContent = `${selectedPhotos.length} photos`;
 }
 initApp();
 setInterval(checkBackend, 5000);
@@ -380,6 +381,7 @@ function renderGrid() {
 
   updateSelectionBar();
   updateCategoryCountsInner();
+  document.getElementById('photo-count').textContent = `${selectedPhotos.length} photos`;
 }
 
 // Event delegation on the grid (set up once, not re-bound on every render)
@@ -599,24 +601,59 @@ document.getElementById('btn-browse').addEventListener('click', async () => {
 // ======================================================================
 
 document.getElementById('btn-describe').addEventListener('click', async () => {
-  if (!selectedPhotos.length) return;
+  // Determine which photos need describing: undescribed + manually selected
+  const needsDescribe = selectedPhotos.filter(p => {
+    const entry = photoStore[p];
+    return !entry || !entry.description || entry.descriptionStatus !== 'ok';
+  });
+  const selectedSet = new Set(selectedCardPaths);
+  const toDescribe = [...new Set([...needsDescribe, ...Array.from(selectedCardPaths)])];
+  // Also include any selected card that's not yet in photoStore
+  selectedCardPaths.forEach(p => {
+    if (!toDescribe.includes(p)) toDescribe.push(p);
+  });
 
-  document.getElementById('btn-describe').disabled = true;
+  const paths = [...new Set(toDescribe.filter(p => selectedPhotos.includes(p)))];
+
+  if (!paths.length) return;
+
+  const btn = document.getElementById('btn-describe');
+  btn.disabled = true;
+  btn.textContent = `Describing 0/${paths.length}...`;
 
   try {
-    const result = await window.api.describePhotos(selectedPhotos);
-    if (result.status === 'ok') {
-      result.results.forEach(r => {
-        if (!photoStore[r.path]) photoStore[r.path] = { description: '', descriptionStatus: '', categories: [] };
-        photoStore[r.path].description = r.description || '';
-        photoStore[r.path].descriptionStatus = r.status;
-      });
-      renderGrid();
-    }
+    await window.api.describePhotosStream(paths, (event) => {
+      if (event.type === 'progress') {
+        // Update photo store immediately
+        if (!photoStore[event.path]) {
+          photoStore[event.path] = { description: '', descriptionStatus: '', categories: [] };
+        }
+        photoStore[event.path].description = event.description || '';
+        photoStore[event.path].descriptionStatus = event.status;
+
+        // Update the specific card in DOM without full re-render
+        // CSS.escape handles backslashes in Windows paths
+        const safePath = CSS.escape(event.path);
+        const card = document.querySelector(`.photo-card[data-path="${safePath}"]`);
+        if (card) {
+          const info = card.querySelector('.photo-info');
+          if (info) {
+            const fname = event.path.split('\\').pop() || event.path;
+            info.textContent = event.description || fname;
+          }
+        }
+
+        btn.textContent = `Describing ${event.current}/${event.total}...`;
+      } else if (event.type === 'done') {
+        btn.textContent = 'Describe All';
+        btn.disabled = selectedPhotos.length === 0;
+        updateCategoryCounts();
+      }
+    });
   } catch (err) {
     console.error('Describe error:', err);
-  } finally {
-    document.getElementById('btn-describe').disabled = selectedPhotos.length === 0;
+    btn.textContent = 'Describe All';
+    btn.disabled = selectedPhotos.length === 0;
   }
 });
 
@@ -631,4 +668,74 @@ document.getElementById('search-input').addEventListener('input', () => {
     _lastRenderedPaths = ''; // force rebuild on search
     renderGrid();
   }, 200);
+});
+
+// ======================================================================
+// Media matching
+// ======================================================================
+
+document.getElementById('btn-match').addEventListener('click', async () => {
+  const dir = await window.api.pickDirectory();
+  if (!dir) return;
+
+  const overlay = document.getElementById('match-overlay');
+  const statusEl = document.getElementById('match-status');
+  const resultsEl = document.getElementById('match-results');
+
+  overlay.style.display = 'flex';
+  statusEl.textContent = 'Matching media with CLIP... (this may take a moment)';
+  resultsEl.innerHTML = '';
+
+  try {
+    const result = await window.api.matchPairs(dir, 0.25);
+    statusEl.textContent =
+      `${result.total_images} images · ${result.total_videos} videos · ${result.pairs.length} matched`;
+
+    let html = '';
+
+    if (result.pairs.length) {
+      html += '<div class="match-section-title">Matched Pairs</div>';
+      result.pairs.forEach(p => {
+        const imgName = p.image.split('\\').pop();
+        const vidName = p.video.split('\\').pop();
+        html += `
+          <div class="match-pair">
+            <span class="match-icon">✓</span>
+            <div class="match-files">
+              <div class="match-file">📷 ${escapeHtml(imgName)}</div>
+              <div class="match-file video">🎬 ${escapeHtml(vidName)}</div>
+            </div>
+            <span class="match-score">${(p.similarity * 100).toFixed(0)}%</span>
+          </div>`;
+      });
+    }
+
+    if (result.unmatched_images?.length) {
+      html += '<div class="match-section-title" style="margin-top:16px">Unmatched Images</div>';
+      result.unmatched_images.forEach(p => {
+        html += `<div class="match-unmatched">📷 ${escapeHtml(p.split('\\').pop())}</div>`;
+      });
+    }
+
+    if (result.unmatched_videos?.length) {
+      html += '<div class="match-section-title" style="margin-top:16px">Unmatched Videos</div>';
+      result.unmatched_videos.forEach(p => {
+        html += `<div class="match-unmatched">🎬 ${escapeHtml(p.split('\\').pop())}</div>`;
+      });
+    }
+
+    if (!html) {
+      html = '<div class="match-unmatched">No media found in this directory.</div>';
+    }
+
+    resultsEl.innerHTML = html;
+  } catch (err) {
+    statusEl.textContent = `Error: ${err.message}`;
+    statusEl.style.color = '#e94560';
+  }
+});
+
+// Close match overlay
+document.getElementById('btn-close-match').addEventListener('click', () => {
+  document.getElementById('match-overlay').style.display = 'none';
 });

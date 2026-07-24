@@ -40,6 +40,7 @@
         <div class="toolbar">
           <button id="btn-browse">Add Photos</button>
           <button id="btn-describe" disabled>Describe All</button>
+          <button id="btn-match">Match Media</button>
           <input type="text" id="search-input" placeholder="Search...">
           <span id="selection-count"></span>
           <button id="btn-deselect-all" class="btn-deselect" title="Deselect all">✕</button>
@@ -47,6 +48,7 @@
             <option value="">Assign category...</option>
           </select>
           <button id="btn-batch-categorize" disabled>Apply</button>
+          <span id="photo-count" class="toolbar-count"></span>
         </div>
         <div id="photo-grid" class="photo-grid">
           <div class="drop-hint">Drop images here</div>
@@ -54,6 +56,19 @@
       </div>
     </main>
   </div>
+
+  <!-- Match results overlay -->
+  <div id="match-overlay" class="overlay" style="display:none">
+    <div class="overlay-content">
+      <div class="overlay-header">
+        <h3>Media Pairs</h3>
+        <button id="btn-close-match" class="btn-close">✕</button>
+      </div>
+      <div id="match-status"></div>
+      <div id="match-results"></div>
+    </div>
+  </div>
+
   <script src="app.js"></script>
 </body>
 </html>
