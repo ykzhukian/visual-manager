@@ -261,8 +261,7 @@ async function loadPersistedPhotos() {
       }
       renderGrid();
       document.getElementById('btn-describe').disabled = selectedPhotos.length === 0;
-      document.getElementById('scan-status').textContent =
-        `Loaded ${result.photos.length} photo(s) from previous session.`;
+      document.getElementById('btn-describe').disabled = selectedPhotos.length === 0;
     }
   } catch (err) {
     console.error('Failed to load photos:', err);
@@ -420,17 +419,24 @@ document.getElementById('photo-grid').addEventListener('click', (e) => {
 });
 
 function updateSelectionBar() {
-  const bar = document.getElementById('selection-bar');
   const countEl = document.getElementById('selection-count');
-  const btn = document.getElementById('btn-batch-categorize');
+  const deselectBtn = document.getElementById('btn-deselect-all');
+  const catSelect = document.getElementById('batch-category-select');
+  const catBtn = document.getElementById('btn-batch-categorize');
 
   if (selectedCardPaths.size > 0) {
-    bar.classList.add('visible');
     countEl.textContent = `${selectedCardPaths.size} selected`;
-    btn.disabled = false;
+    countEl.style.visibility = 'visible';
+    deselectBtn.style.visibility = 'visible';
+    catSelect.style.visibility = 'visible';
+    catBtn.style.visibility = 'visible';
+    catBtn.disabled = false;
   } else {
-    bar.classList.remove('visible');
-    btn.disabled = true;
+    countEl.style.visibility = 'hidden';
+    deselectBtn.style.visibility = 'hidden';
+    catSelect.style.visibility = 'hidden';
+    catBtn.style.visibility = 'hidden';
+    catBtn.disabled = true;
   }
 }
 
@@ -539,10 +545,7 @@ photoGrid.addEventListener('drop', (e) => {
     }
   }
 
-  if (!imagePaths.length) {
-    document.getElementById('scan-status').textContent = 'No valid image files dropped.';
-    return;
-  }
+  if (!imagePaths.length) return;
 
   const existing = new Set(selectedPhotos);
   const newPaths = [];
@@ -560,8 +563,6 @@ photoGrid.addEventListener('drop', (e) => {
 
     renderGrid();
   document.getElementById('btn-describe').disabled = selectedPhotos.length === 0;
-  document.getElementById('scan-status').textContent =
-    `Dropped ${imagePaths.length} file(s). Added ${newPaths.length} new. Total: ${selectedPhotos.length}.`;
   updateCategoryCounts();
 });
 
@@ -589,8 +590,6 @@ document.getElementById('btn-browse').addEventListener('click', async () => {
     }
         renderGrid();
     document.getElementById('btn-describe').disabled = selectedPhotos.length === 0;
-    document.getElementById('scan-status').textContent =
-      `Added ${files.length} photo(s). Total: ${selectedPhotos.length}.`;
     updateCategoryCounts();
   }
 });
@@ -602,8 +601,6 @@ document.getElementById('btn-browse').addEventListener('click', async () => {
 document.getElementById('btn-describe').addEventListener('click', async () => {
   if (!selectedPhotos.length) return;
 
-  const statusEl = document.getElementById('scan-status');
-  statusEl.textContent = 'Describing photos...';
   document.getElementById('btn-describe').disabled = true;
 
   try {
@@ -614,11 +611,10 @@ document.getElementById('btn-describe').addEventListener('click', async () => {
         photoStore[r.path].description = r.description || '';
         photoStore[r.path].descriptionStatus = r.status;
       });
-            renderGrid();
-      statusEl.textContent = `Described ${result.count} photo(s).`;
+      renderGrid();
     }
   } catch (err) {
-    statusEl.textContent = `Error: ${err.message}`;
+    console.error('Describe error:', err);
   } finally {
     document.getElementById('btn-describe').disabled = selectedPhotos.length === 0;
   }

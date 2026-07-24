@@ -37,24 +37,16 @@
 
     <main id="content">
       <div id="view-library" class="view active">
-        <div class="library-header">
-          <h2>Library</h2>
-          <div class="toolbar">
-            <button id="btn-browse">Add Photos</button>
-            <button id="btn-describe" disabled>Describe All</button>
-          </div>
-          <input type="text" id="search-input" placeholder="Search by description or category...">
-        </div>
-        <div id="scan-status"></div>
-        <div id="selection-bar">
+        <div class="toolbar">
+          <button id="btn-browse">Add Photos</button>
+          <button id="btn-describe" disabled>Describe All</button>
+          <input type="text" id="search-input" placeholder="Search...">
           <span id="selection-count"></span>
           <button id="btn-deselect-all" class="btn-deselect" title="Deselect all">✕</button>
-          <div class="category-batch-row">
-            <select id="batch-category-select">
-              <option value="">Assign category...</option>
-            </select>
-            <button id="btn-batch-categorize" disabled>Apply</button>
-          </div>
+          <select id="batch-category-select">
+            <option value="">Assign category...</option>
+          </select>
+          <button id="btn-batch-categorize" disabled>Apply</button>
         </div>
         <div id="photo-grid" class="photo-grid">
           <div class="drop-hint">Drop images here</div>

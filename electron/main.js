@@ -4,6 +4,9 @@ const path = require('path');
 const http = require('http');
 const fs = require('fs');
 
+// Hot reload in development — watches source files and reloads the window on change
+try { require('electron-reloader')(module, { watchRenderer: true }); } catch (_) {}
+
 const BACKEND_PORT = 8765;
 const BACKEND_URL = `http://127.0.0.1:${BACKEND_PORT}`;
 
@@ -100,9 +103,9 @@ ipcMain.handle('file:stats', async (_event, paths) => {
 
 function createWindow() {
   mainWindow = new BrowserWindow({
-    width: 1200,
-    height: 800,
-    minWidth: 800,
+    width: 1800,
+    height: 1050,
+    minWidth: 900,
     minHeight: 600,
     title: 'Visual Manager',
     webPreferences: {

@@ -32,8 +32,12 @@ def init_db(db_path: str | None = None) -> None:
         CREATE TABLE IF NOT EXISTS photos (
             id          INTEGER PRIMARY KEY AUTOINCREMENT,
             path        TEXT UNIQUE NOT NULL,
-            added_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            deleted     INTEGER DEFAULT 0,
+            added_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            deleted_at  TIMESTAMP
         );
+
+        CREATE INDEX IF NOT EXISTS idx_photos_deleted ON photos(deleted);
 
         CREATE TABLE IF NOT EXISTS descriptions (
             id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -59,6 +63,15 @@ def init_db(db_path: str | None = None) -> None:
         CREATE INDEX IF NOT EXISTS idx_pc_photo_id ON photo_categories(photo_id);
         CREATE INDEX IF NOT EXISTS idx_pc_category_id ON photo_categories(category_id);
         """)
+        # Migrate existing databases that lack the soft-delete columns
+        for col, ddl in [
+            ("deleted", "ALTER TABLE photos ADD COLUMN deleted INTEGER DEFAULT 0"),
+            ("deleted_at", "ALTER TABLE photos ADD COLUMN deleted_at TIMESTAMP"),
+        ]:
+            try:
+                conn.execute(ddl)
+            except sqlite3.OperationalError:
+                pass  # column already exists
         conn.commit()
         print(f"[database] Initialized at {_db_path}")
     finally:
@@ -70,15 +83,25 @@ def init_db(db_path: str | None = None) -> None:
 # ======================================================================
 
 def add_photos(paths: list[str]) -> int:
-    """Add photo paths. Duplicates ignored. Returns count of newly inserted."""
+    """Add photo paths. Duplicates skipped. Soft-deleted photos are restored
+    (keeping descriptions + category links). Returns count of newly inserted or restored."""
     conn = _connect()
     try:
         added = 0
         for p in paths:
             try:
+                # Try insert (new path)
                 conn.execute("INSERT OR IGNORE INTO photos (path) VALUES (?)", (p,))
                 if conn.changes > 0:
                     added += 1
+                else:
+                    # Path already exists — restore if soft-deleted
+                    cursor = conn.execute(
+                        "UPDATE photos SET deleted = 0, deleted_at = NULL WHERE path = ? AND deleted = 1",
+                        (p,),
+                    )
+                    if cursor.rowcount > 0:
+                        added += 1
             except Exception:
                 pass
         conn.commit()
@@ -88,10 +111,13 @@ def add_photos(paths: list[str]) -> int:
 
 
 def remove_photo(path: str) -> bool:
-    """Remove a photo by path. Cascade deletes descriptions + category links."""
+    """Soft-delete a photo: mark as deleted, keep descriptions + categories for restore."""
     conn = _connect()
     try:
-        cursor = conn.execute("DELETE FROM photos WHERE path = ?", (path,))
+        cursor = conn.execute(
+            "UPDATE photos SET deleted = 1, deleted_at = CURRENT_TIMESTAMP WHERE path = ? AND deleted = 0",
+            (path,),
+        )
         deleted = cursor.rowcount > 0
         conn.commit()
         return deleted
@@ -224,7 +250,7 @@ def get_all_photos(category_id: int | None = None, query: str | None = None) -> 
     """
     conn = _connect()
     try:
-        sql = "SELECT id, path, added_at FROM photos"
+        sql = "SELECT id, path, added_at FROM photos WHERE deleted = 0"
         params: list = []
         conditions: list[str] = []
 
